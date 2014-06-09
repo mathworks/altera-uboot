@@ -176,7 +176,28 @@
  * CONFIG_BOOTARGS goes into the environment value "bootargs".
  * Do note the value will overide also the chosen node in FDT blob.
  */
+#ifdef CONFIG_SOCFPGA_USE_BOOTARGS
 #define CONFIG_BOOTARGS "console=ttyS0," __stringify(CONFIG_BAUDRATE)
+#define CONFIG_SOCFPGA_BOOTCMDS \
+    "ramboot=setenv bootargs " CONFIG_BOOTARGS ";" \
+	    "bootz ${loadaddr} - ${fdtaddr}\0" \
+    "mmcboot=setenv bootargs " CONFIG_BOOTARGS \
+		" root=${mmcroot} rw rootwait;" \
+		"bootz ${loadaddr} - ${fdtaddr}\0" \
+    "qspiboot=setenv bootargs " CONFIG_BOOTARGS \
+		" root=${qspiroot} rw rootfstype=${qspirootfstype};"\
+		"bootz ${loadaddr} - ${fdtaddr}\0"
+#else
+/*
+ * bootargs come from the device tree or kernel
+ */
+#define CONFIG_BOOTARGS ""
+#define CONFIG_SOCFPGA_BOOTCMDS \
+    "ramboot=bootz ${loadaddr} - ${fdtaddr}\0" \
+    "mmcboot=bootz ${loadaddr} - ${fdtaddr}\0" \
+    "qspiboot=bootz ${loadaddr} - ${fdtaddr}\0"
+
+#endif
 
 #define CONFIG_EXTRA_ENV_SETTINGS \
 	"verify=n\0" \
@@ -198,22 +219,15 @@
 	"nandfdtaddr=0xA0000\0" \
 	"nandroot=/dev/mtdblock1\0" \
 	"nandrootfstype=jffs2\0" \
-	"ramboot=setenv bootargs " CONFIG_BOOTARGS ";" \
-		"bootz ${loadaddr} - ${fdtaddr}\0" \
 	"mmcload=mmc rescan;" \
 		"${mmcloadcmd} mmc 0:${mmcloadpart} ${loadaddr} ${bootimage};" \
 		"${mmcloadcmd} mmc 0:${mmcloadpart} ${fdtaddr} ${fdtimage}\0" \
-	"mmcboot=setenv bootargs " CONFIG_BOOTARGS \
-		" root=${mmcroot} rw rootwait;" \
-		"bootz ${loadaddr} - ${fdtaddr}\0" \
 	"netboot=dhcp ${bootimage} ; " \
 		"tftp ${fdtaddr} ${fdtimage} ; run ramboot\0" \
 	"qspiload=sf probe ${qspiloadcs};" \
 		"sf read ${loadaddr} ${qspibootimageaddr} ${bootimagesize};" \
 		"sf read ${fdtaddr} ${qspifdtaddr} ${fdtimagesize};\0" \
-	"qspiboot=setenv bootargs " CONFIG_BOOTARGS \
-		" root=${qspiroot} rw rootfstype=${qspirootfstype};"\
-		"bootz ${loadaddr} - ${fdtaddr}\0" \
+    CONFIG_SOCFPGA_BOOTCMDS \
 	"nandload=nand read ${loadaddr} ${nandbootimageaddr} ${bootimagesize};"\
 		"nand read ${fdtaddr} ${nandfdtaddr} ${fdtimagesize}\0" \
 	"nandboot=setenv bootargs " CONFIG_BOOTARGS \
