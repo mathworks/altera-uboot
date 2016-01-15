@@ -17,12 +17,8 @@
 #ifndef __CONFIG_COMMON_H
 #define __CONFIG_COMMON_H
 
-#include <asm/arch/socfpga_base_addrs.h>
-#include "../../board/altera/socfpga/build.h"
-#include "../../board/altera/socfpga/pinmux_config.h"
-#include "../../board/altera/socfpga/pll_config.h"
-#include "../../board/altera/socfpga/sdram/sdram_config.h"
-#include "../../board/altera/socfpga/reset_config.h"
+#include <asm/arch/hardware.h>
+#include <asm/arch/clock_manager.h>
 
 /* Enabled for U-Boot debug message printout? */
 /*#define DEBUG*/
@@ -72,6 +68,8 @@
 /* Enable board late init for ECC setup if IRQ enabled */
 #define CONFIG_BOARD_LATE_INIT
 #endif
+/* Enable THUMB2 mode to reduce software size which yield better boot time */
+#define CONFIG_SYS_THUMB_BUILD
 
 /*
  * Display CPU and Board Info
@@ -100,7 +98,7 @@
 /* Room required on the stack for the environment data */
 #define CONFIG_ENV_SIZE			4096
 /* Size of DRAM reserved for malloc() use */
-#define CONFIG_SYS_MALLOC_LEN		(CONFIG_ENV_SIZE + 192 * 1024)
+#define CONFIG_SYS_MALLOC_LEN		(CONFIG_ENV_SIZE + 256 * 1024)
 
 /*
  * Stack setup
@@ -158,6 +156,8 @@
 #define CONFIG_ENV_OVERWRITE
 /* Enable auto completion of commands using TAB */
 #define CONFIG_AUTO_COMPLETE
+/* Enable editing and history functions for interactive CLI operations */
+#define CONFIG_CMDLINE_EDITING
 /* Additional help message */
 #define CONFIG_SYS_LONGHELP
 /* use "hush" command parser */
@@ -191,6 +191,7 @@
 /*
  * bootargs come from the device tree or kernel
  */
+#define CONFIG_BOOTARGS ""
 #define CONFIG_SOCFPGA_BOOTCMDS \
     "ramboot=bootz ${loadaddr} - ${fdtaddr}\0" \
     "mmcboot=bootz ${loadaddr} - ${fdtaddr}\0" \
@@ -205,7 +206,7 @@
 	"bootimage=zImage\0" \
 	"bootimagesize=0x600000\0" \
 	"fdtimage=socfpga.dtb\0" \
-	"fdtimagesize=0x5000\0" \
+	"fdtimagesize=0x7000\0" \
 	"mmcloadcmd=fatload\0" \
 	"mmcloadpart=1\0" \
 	"mmcroot=/dev/mmcblk0p2\0" \
@@ -214,6 +215,10 @@
 	"qspifdtaddr=0x50000\0" \
 	"qspiroot=/dev/mtdblock1\0" \
 	"qspirootfstype=jffs2\0" \
+	"nandbootimageaddr=0x120000\0" \
+	"nandfdtaddr=0xA0000\0" \
+	"nandroot=/dev/mtdblock1\0" \
+	"nandrootfstype=jffs2\0" \
 	"mmcload=mmc rescan;" \
 		"${mmcloadcmd} mmc 0:${mmcloadpart} ${loadaddr} ${bootimage};" \
 		"${mmcloadcmd} mmc 0:${mmcloadpart} ${fdtaddr} ${fdtimage}\0" \
@@ -223,6 +228,11 @@
 		"sf read ${loadaddr} ${qspibootimageaddr} ${bootimagesize};" \
 		"sf read ${fdtaddr} ${qspifdtaddr} ${fdtimagesize};\0" \
     CONFIG_SOCFPGA_BOOTCMDS \
+	"nandload=nand read ${loadaddr} ${nandbootimageaddr} ${bootimagesize};"\
+		"nand read ${fdtaddr} ${nandfdtaddr} ${fdtimagesize}\0" \
+	"nandboot=setenv bootargs " CONFIG_BOOTARGS \
+		" root=${nandroot} rw rootfstype=${nandrootfstype};"\
+		"bootz ${loadaddr} - ${fdtaddr}\0" \
 	"fpga=0\0" \
 	"fpgadata=0x2000000\0" \
 	"fpgadatasize=0x700000\0" \
@@ -251,6 +261,9 @@
 #if (CONFIG_PRELOADER_BOOT_FROM_SDMMC == 1)
 /* Store envirnoment in MMC card */
 #define CONFIG_ENV_IS_IN_MMC
+#elif (CONFIG_PRELOADER_BOOT_FROM_NAND == 1)
+/* Store envirnoment in NAND flash */
+#define CONFIG_ENV_IS_IN_NAND
 #else
 /* Store envirnoment in SPI flash */
 #define CONFIG_ENV_IS_IN_SPI_FLASH
@@ -270,6 +283,11 @@
 #ifdef CONFIG_ENV_IS_IN_MMC
 #define CONFIG_SYS_MMC_ENV_DEV		0	/* device 0 */
 #define CONFIG_ENV_OFFSET		512	/* just after the MBR */
+#endif
+
+/* environment setting for NAND */
+#ifdef CONFIG_ENV_IS_IN_NAND
+#define CONFIG_ENV_OFFSET		(0x00080000)
 #endif
 
 /*
@@ -298,17 +316,29 @@
 /* SDRAM Bank #1 */
 #define CONFIG_SYS_SDRAM_BASE		0x00000000
 /* SDRAM memory size */
+/*
+ * Enable auto calculation of sdram size. Code will ignore PHYS_SDRAM_1_SIZE
+ * Auto calculation can be disabled for use case where user want to
+ * utilize portion of SDRAM only (PHYS_SDRAM_1_SIZE will be used then)
+ */
+#define CONFIG_SDRAM_CALCULATE_SIZE
+/*
+ * Remain PHYS_SDRAM_1_SIZE as its still used by U-Boot memory test (mtest)
+ * when user didn't specify mtest end address in console
+ */
 #ifdef CONFIG_SOCFPGA_VIRTUAL_TARGET
 #define PHYS_SDRAM_1_SIZE		0x80000000
 #else
-#define PHYS_SDRAM_1_SIZE		0x40000000
+/* Put to 32MB as the smallest SDRAM size to prevent mtest from failing */
+#define PHYS_SDRAM_1_SIZE		0x02000000
 #endif
 /* SDRAM Bank #1 base address */
 #define PHYS_SDRAM_1			CONFIG_SYS_SDRAM_BASE
-/* memtest setup */
+/* U-Boot memtest setup */
 /* Begin and end addresses of the area used by the simple memory test.c */
 #define CONFIG_SYS_MEMTEST_START	0x00000000
 #define CONFIG_SYS_MEMTEST_END		PHYS_SDRAM_1_SIZE
+
 
 /*
  * L2 PL-310
@@ -335,16 +365,13 @@
 #define UART0_BASE			SOCFPGA_UART0_ADDRESS
 #define CONFIG_SYS_NS16550_SERIAL
 #define CONFIG_SYS_NS16550_REG_SIZE	-4
-#define CONFIG_SYS_NS16550_CLK          V_NS16550_CLK
 #define CONFIG_CONS_INDEX               1
 #define CONFIG_SYS_NS16550_COM1		UART0_BASE
 #define CONFIG_SYS_BAUDRATE_TABLE {4800, 9600, 19200, 38400, 57600, 115200}
 #if defined(CONFIG_SOCFPGA_VIRTUAL_TARGET)
-#define V_NS16550_CLK			1000000
-#elif defined(CONFIG_SPL_BUILD)
-#define V_NS16550_CLK			CONFIG_HPS_CLK_L4_SP_HZ
+#define CONFIG_SYS_NS16550_CLK		1000000
 #else
-#define V_NS16550_CLK			(100000000)
+#define CONFIG_SYS_NS16550_CLK		(cm_l4_sp_clock)
 #endif
 #define CONFIG_BAUDRATE			115200
 #endif /* CONFIG_SYS_NS16550 */
@@ -357,10 +384,12 @@
 /*
  * USB
  */
-/*#define CONFIG_CMD_USB		1
-#define CONFIG_USB_STORAGE		1
-#define CONFIG_USB_DWC_OTG_HCD		1
-#define CONFIG_DOS_PARTITION		1*/
+#define CONFIG_SYS_USB_ADDRESS SOCFPGA_USB1_ADDRESS
+#define CONFIG_CMD_USB
+#define CONFIG_USB_DWC2_OTG
+#define CONFIG_USB_STORAGE
+#define CONFIG_USB_HOST_ETHER
+#define CONFIG_USB_ETHER_ASIX
 
 /*
  * L4 OSC1 Timer 0
@@ -375,10 +404,9 @@
 /* Clocks source frequency to timer */
 #if defined(CONFIG_SOCFPGA_VIRTUAL_TARGET)
 #define CONFIG_TIMER_CLOCK_KHZ		2400
-#elif defined(CONFIG_SPL_BUILD)
-#define CONFIG_TIMER_CLOCK_KHZ		(CONFIG_HPS_CLK_OSC1_HZ/1000)
 #else
-#define CONFIG_TIMER_CLOCK_KHZ		(25000)
+/* Preloader and U-Boot need to know the clock source frequency from handoff*/
+#define CONFIG_TIMER_CLOCK_KHZ		(CONFIG_HPS_CLK_OSC1_HZ / 1000)
 #endif
 
 /*
@@ -391,10 +419,9 @@
 /* Clocks source frequency to watchdog timer */
 #if defined(CONFIG_SOCFPGA_VIRTUAL_TARGET)
 #define CONFIG_DW_WDT_CLOCK_KHZ		2400
-#elif defined(CONFIG_SPL_BUILD)
-#define CONFIG_DW_WDT_CLOCK_KHZ		(CONFIG_HPS_CLK_OSC1_HZ/1000)
 #else
-#define CONFIG_DW_WDT_CLOCK_KHZ		(25000)
+/* Preloader and U-Boot need to know the clock source frequency from handoff*/
+#define CONFIG_DW_WDT_CLOCK_KHZ		(CONFIG_HPS_CLK_OSC1_HZ / 1000)
 #endif
 
 /*
@@ -450,12 +477,11 @@
 #define CONFIG_DWMMC_FIFO_DEPTH		1024
 /* using smaller max blk cnt to avoid flooding the limited stack we have */
 #define CONFIG_SYS_MMC_MAX_BLK_COUNT     256
+#define CONFIG_DWMMC_BUS_HZ		(cm_sdmmc_clock)
 #if defined(CONFIG_SPL_BUILD)
 #define CONFIG_DWMMC_BUS_WIDTH		CONFIG_HPS_SDMMC_BUSWIDTH
-#define CONFIG_DWMMC_BUS_HZ		(CONFIG_HPS_CLK_SDMMC_HZ / 4)
 #else
 #define CONFIG_DWMMC_BUS_WIDTH		4
-#define CONFIG_DWMMC_BUS_HZ		(12500000)
 #endif	/* CONFIG_SPL_BUILD */
 #endif	/* CONFIG_MMC */
 
@@ -475,17 +501,14 @@
 #ifdef CONFIG_CADENCE_QSPI
 #define CONFIG_SPI_FLASH		/* SPI flash subsystem */
 #define CONFIG_SPI_FLASH_STMICRO	/* Micron/Numonyx flash */
+#define CONFIG_SPI_FLASH_SPANSION	/* Spansion flash */
 #define CONFIG_CMD_SF			/* Serial flash commands */
 /* Flash device info */
 #define CONFIG_SF_DEFAULT_SPEED		(50000000)
 #define CONFIG_SF_DEFAULT_MODE		SPI_MODE_3
 #define CONFIG_SPI_FLASH_QUAD		(1)
 /* QSPI reference clock */
-#if defined(CONFIG_SPL_BUILD)
-#define CONFIG_CQSPI_REF_CLK		CONFIG_HPS_CLK_QSPI_HZ
-#else
-#define CONFIG_CQSPI_REF_CLK		(400000000)
-#endif	/* CONFIG_SPL_BUILD */
+#define CONFIG_CQSPI_REF_CLK		(cm_qspi_clock)
 /* QSPI page size and block size */
 #define CONFIG_CQSPI_PAGE_SIZE		(256)
 #define CONFIG_CQSPI_BLOCK_SIZE		(16)
@@ -495,12 +518,23 @@
 #define CONFIG_CQSPI_TCHSH_NS		(20)
 #define CONFIG_CQSPI_TSLCH_NS		(20)
 #define CONFIG_CQSPI_DECODER		(0)
-#ifdef CONFIG_SOCFPGA_VIRTUAL_TARGET
-#define CONFIG_CQSPI_4BYTE_ADDR		(0)
-#else
-#define CONFIG_CQSPI_4BYTE_ADDR		(1)
-#endif	/* CONFIG_SOCFPGA_VIRTUAL_TARGET */
 #endif	/* CONFIG_CADENCE_QSPI */
+
+/* NAND */
+#undef CONFIG_NAND_DENALI
+#ifdef CONFIG_NAND_DENALI
+#define CONFIG_CMD_NAND
+#define CONFIG_SYS_MAX_NAND_DEVICE	1
+#define CONFIG_SYS_NAND_USE_FLASH_BBT
+#define CONFIG_SYS_NAND_REGS_BASE	SOCFPGA_NAND_REGS_ADDRESS
+#define CONFIG_SYS_NAND_DATA_BASE	SOCFPGA_NAND_DATA_ADDRESS
+#define CONFIG_SYS_NAND_BASE		CONFIG_SYS_NAND_REGS_BASE
+#define CONFIG_SYS_NAND_ONFI_DETECTION
+/* How many bytes need to be skipped at the start of spare area */
+#define CONFIG_NAND_DENALI_SPARE_AREA_SKIP_BYTES	(2)
+/* The ECC size which either 512 or 1024 */
+#define CONFIG_NAND_DENALI_ECC_SIZE			(512)
+#endif /* CONFIG_NAND_DENALI */
 
 /*
  * FPGA support
@@ -516,6 +550,25 @@
 /* Enable FPGA command at console */
 #define CONFIG_CMD_FPGA
 
+/*
+ * DMA support
+ */
+#define CONFIG_PL330_DMA
+#define CONFIG_SPL_DMA_SUPPORT
+
+/*
+ * I2C support
+ */
+#define CONFIG_HARD_I2C
+#define CONFIG_DW_I2C
+#define CONFIG_SYS_I2C_BASE		SOCFPGA_I2C0_ADDRESS
+/* using standard mode which the speed up to 100Kb/s) */
+#define CONFIG_SYS_I2C_SPEED		(100000)
+/* address of device when used as slave */
+#define CONFIG_SYS_I2C_SLAVE		(0x02)
+/* clock supplied to I2C controller in unit of MHz */
+#define IC_CLK				(cm_l4_sp_clock / 1000000)
+#define CONFIG_CMD_I2C
 
 /*
  * SPL "Second Program Loader" aka Preloader
@@ -646,6 +699,34 @@
 #endif
 
 /*
+ * Boot from NAND
+ */
+#ifndef CONFIG_PRELOADER_BOOT_FROM_NAND
+#error "CONFIG_PRELOADER_BOOT_FROM_NAND must be defined"
+#endif
+#if (CONFIG_PRELOADER_BOOT_FROM_NAND == 1)
+/* Support for drivers/mmc/libmmc.o in SPL binary */
+#define CONFIG_SPL_NAND_SUPPORT
+#define CONFIG_SPL_NAND_SIMPLE
+#define CONFIG_SPL_NAND_DRIVERS
+#define CONFIG_SYS_NAND_U_BOOT_OFFS	CONFIG_PRELOADER_NAND_NEXT_BOOT_IMAGE
+#define CONFIG_SYS_NAND_PAGE_SIZE	2048
+#define CONFIG_SYS_NAND_OOBSIZE		64
+#define CONFIG_SYS_NAND_BLOCK_SIZE	(128 * 1024)
+/* number of pages per block */
+#define CONFIG_SYS_NAND_PAGE_COUNT	64
+/* location of bad block marker within OOB */
+#define CONFIG_SYS_NAND_BAD_BLOCK_POS	0
+/* to use the ecc.read_page and ecc.read_page_raw */
+#define CONFIG_SPL_USE_ECC_READ
+/* To allocate buffer size for Denali driver. Cannot use standard as its
+ * too large which bloated Preloader a lot
+ */
+#define NAND_MAX_OOBSIZE	CONFIG_SYS_NAND_OOBSIZE
+#define NAND_MAX_PAGESIZE	CONFIG_SYS_NAND_PAGE_SIZE
+#endif
+
+/*
  * Support for checksum in SPL binary
  */
 #ifndef CONFIG_PRELOADER_CHECKSUM_NEXT_IMAGE
@@ -680,15 +761,17 @@
 /*
  * Support for FAT partition if boot from SDMMC
  */
-#if (CONFIG_PRELOADER_BOOT_FROM_SDMMC == 1)
+#if (CONFIG_PRELOADER_BOOT_FROM_SDMMC == 1 && CONFIG_PRELOADER_FAT_SUPPORT == 1)
 /* MMC with FAT partition support */
-#undef CONFIG_SPL_FAT_SUPPORT
+#define CONFIG_SPL_FAT_SUPPORT
 #endif
 
 #ifdef CONFIG_SPL_FAT_SUPPORT
 #define CONFIG_SPL_LIBDISK_SUPPORT
-#define CONFIG_SYS_MMC_SD_FAT_BOOT_PARTITION	1
-#define CONFIG_SPL_FAT_LOAD_PAYLOAD_NAME	"u-boot.img"
+#define CONFIG_SYS_MMC_SD_FAT_BOOT_PARTITION	\
+				CONFIG_PRELOADER_FAT_BOOT_PARTITION
+#define CONFIG_SPL_FAT_LOAD_PAYLOAD_NAME	\
+				CONFIG_PRELOADER_FAT_LOAD_PAYLOAD_NAME
 #endif /* CONFIG_SPL_FAT_SUPPORT */
 
 /*
@@ -722,6 +805,15 @@
 #undef CONFIG_SPL_FPGA_LOAD
 /* location of FPGA RBF image within QSPI */
 #define CONFIG_SPL_FPGA_QSPI_ADDR	(0x800000)
+/* RBF file name if its located within SD card */
+#define CONFIG_SPL_FPGA_FAT_NAME	"fpga.rbf"
+
+/* ensure FAT is defined if CONFIG_SPL_FPGA_LOAD is defined */
+#ifdef CONFIG_SPL_FPGA_LOAD
+#if (CONFIG_PRELOADER_BOOT_FROM_SDMMC == 1 && !defined(CONFIG_SPL_FAT_SUPPORT))
+#error "CONFIG_SPL_FAT_SUPPORT required for  CONFIG_SPL_FPGA_LOAD"
+#endif	/* CONFIG_SPL_FAT_SUPPORT */
+#endif	/* CONFIG_SPL_FPGA_LOAD */
 
 /*
  * Enable memory padding if SDRAM ECC is enabled
@@ -729,5 +821,10 @@
 #if (CONFIG_HPS_SDR_CTRLCFG_CTRLCFG_ECCEN == 1)
 #define CONFIG_SPL_SDRAM_ECC_PADDING	32
 #endif
+
+/* ARM Errata */
+#define CONFIG_ARM_ERRATA_761320
+
+#define CONFIG_CMD_SETEXPR
 
 #endif	/* __CONFIG_COMMON_H */

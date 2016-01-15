@@ -31,7 +31,8 @@ extern char __sdram_stack_start, __sdram_stack_end;
 extern char __irq_stack_start;
 #endif /* CONFIG_USE_IRQ */
 
-#if (CONFIG_PRELOADER_WARMRST_SKIP_CFGIO == 1)
+#if (CONFIG_PRELOADER_WARMRST_SKIP_CFGIO == 1) || \
+(CONFIG_HPS_RESET_WARMRST_HANDSHAKE_SDRAM == 1)
 extern u32 rst_mgr_status __attribute__ ((section(".data")));
 #endif
 
@@ -44,5 +45,6 @@ void relocate_stack_to_sdram(void);
 #define BOOT_DEVICE_MMC1 3
 #define BOOT_DEVICE_MMC2 4
 #define BOOT_DEVICE_MMC2_2 5
+#define BOOT_DEVICE_NAND 6
 
 #endif

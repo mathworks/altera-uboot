@@ -34,6 +34,7 @@
 #include <linux/compiler.h>
 #include <asm/io.h>
 #include <watchdog.h>
+#include <asm/arch/sdram.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
@@ -140,7 +141,7 @@ __weak void __noreturn jump_to_image_no_args(struct spl_image_info *spl_image)
 #ifdef CONFIG_SPL_CHECKSUM_NEXT_IMAGE
 	u32 calculated_crc;
 	if (spl_image->crc_size != 0) {
-#ifdef CONFIG_SPL_SDRAM_ECC_PADDING
+#if defined(CONFIG_SPL_SDRAM_ECC_PADDING) && !defined(CONFIG_SPL_SPI_XIP)
 		/*
 		 * do additional memory initialization / padding to avoid
 		 * the false double bit error (DBE) during read back
@@ -168,6 +169,11 @@ __weak void __noreturn jump_to_image_no_args(struct spl_image_info *spl_image)
 			debug("OK\n");
 	}
 #endif
+
+#if (CONFIG_PRELOADER_SDRAM_SCRUB_REMAIN_REGION == 1)
+	/* Ensure scrubbing finished before hand over to next stage */
+	sdram_scrub_remain_region_finish();
+#endif /* CONFIG_PRELOADER_SDRAM_SCRUB_REMAIN_REGION */
 
 	debug("image entry point: 0x%X\n", spl_image->entry_point);
 	/* Pass the saved boot_params from rom code */

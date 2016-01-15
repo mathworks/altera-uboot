@@ -35,10 +35,17 @@ extern unsigned long irq_cnt_ecc_sdram;
 void irq_handler_ecc_sdram(void *arg);
 void sdram_enable_interrupt(unsigned enable);
 void sdram_applycfg_uboot(void);
+int hps_emif_diag_test(int complexity, unsigned int addr_bgn,
+	unsigned int addr_end);
+unsigned long sdram_calculate_size(void);
 #ifdef CONFIG_SPL_BUILD
-unsigned sdram_mmr_init_full(void);
+unsigned sdram_mmr_init_full(unsigned int sdr_phy_reg);
 unsigned sdram_calibration_full(void);
+unsigned sdram_check_self_refresh_seq(void);
 #endif /* CONFIG_SPL_BUILD */
+void sdram_scrub_boot_region(void);
+void sdram_scrub_remain_region_trigger(void);
+void sdram_scrub_remain_region_finish(void);
 
 #endif /* __ASSEMBLY__ */
 
@@ -88,6 +95,10 @@ unsigned sdram_calibration_full(void);
 #define SDR_CTRLGRP_DROPCOUNT_ADDRESS 0x504c
 /* Register: sdr.ctrlgrp.dropaddr                                          */
 #define SDR_CTRLGRP_DROPADDR_ADDRESS 0x5050
+/* Register: sdr.ctrlgrp.lowpwreq                                          */
+#define SDR_CTRLGRP_LOWPWREQ_ADDRESS 0x5054
+/* Register: sdr.ctrlgrp.lowpwrack                                         */
+#define SDR_CTRLGRP_LOWPWRACK_ADDRESS 0x5058
 /* Register: sdr.ctrlgrp.staticcfg                                         */
 #define SDR_CTRLGRP_STATICCFG_ADDRESS 0x505c
 /* Register: sdr.ctrlgrp.ctrlwidth                                         */
@@ -110,6 +121,16 @@ unsigned sdram_calibration_full(void);
 #define SDR_CTRLGRP_FPGAPORTRST_ADDRESS 0x5080
 /* Register: sdr.ctrlgrp.fifocfg                                           */
 #define SDR_CTRLGRP_FIFOCFG_ADDRESS 0x5088
+/* Register: sdr.ctrlgrp.protportdefault				   */
+#define SDR_CTRLGRP_PROTPORTDEFAULT_ADDRESS 0x508c
+/* Register: sdr.ctrlgrp.protruleaddr					   */
+#define SDR_CTRLGRP_PROTRULEADDR_ADDRESS 0x5090
+/* Register: sdr.ctrlgrp.protruleid					   */
+#define SDR_CTRLGRP_PROTRULEID_ADDRESS 0x5094
+/* Register: sdr.ctrlgrp.protruledata					   */
+#define SDR_CTRLGRP_PROTRULEDATA_ADDRESS 0x5098
+/* Register: sdr.ctrlgrp.protrulerdwr					   */
+#define SDR_CTRLGRP_PROTRULERDWR_ADDRESS 0x509c
 /* Register: sdr.ctrlgrp.mppriority                                        */
 #define SDR_CTRLGRP_MPPRIORITY_ADDRESS 0x50ac
 /* Wide Register: sdr.ctrlgrp.mpweight                                     */
@@ -264,6 +285,21 @@ unsigned sdram_calibration_full(void);
 /* Register template: sdr::ctrlgrp::dbecount                               */
 #define SDR_CTRLGRP_DBECOUNT_COUNT_LSB 0
 #define SDR_CTRLGRP_DBECOUNT_COUNT_MASK 0x000000ff
+/* Register template: sdr.ctrlgrp.lowpwreq                                 */
+#define SDR_CTRLGRP_LOWPWREQ_DEEPPWRDNREQ_LSB 0
+#define SDR_CTRLGRP_LOWPWREQ_DEEPPWRDNREQ_MASK 0x00000001
+#define SDR_CTRLGRP_LOWPWREQ_DEEPPWRDNMASK_LSB 1
+#define SDR_CTRLGRP_LOWPWREQ_DEEPPWRDNMASK_MASK 0x00000006
+#define SDR_CTRLGRP_LOWPWREQ_SELFRSHREQ_LSB 3
+#define SDR_CTRLGRP_LOWPWREQ_SELFRSHREQ_MASK 0x00000008
+#define SDR_CTRLGRP_LOWPWREQ_SELFRSHREQ_ENABLED 0x1
+#define SDR_CTRLGRP_LOWPWREQ_SELFRSHREQ_DISABLED 0x0
+#define SDR_CTRLGRP_LOWPWREQ_SELFRFSHMASK_LSB 4
+#define SDR_CTRLGRP_LOWPWREQ_SELFRFSHMASK_MASK 0x00000030
+#define SDR_CTRLGRP_LOWPWREQ_SELFRFSHMASK_BOTH_CHIPS 0x3
+/* Register template: sdr::ctrlgrp::lowpwrack                              */
+#define SDR_CTRLGRP_LOWPWRACK_SELFRFSHACK_LSB 1
+#define SDR_CTRLGRP_LOWPWRACK_SELFRFSHACK_MASK 0x00000002
 /* Register template: sdr::ctrlgrp::staticcfg                              */
 #define SDR_CTRLGRP_STATICCFG_APPLYCFG_LSB 3
 #define SDR_CTRLGRP_STATICCFG_APPLYCFG_MASK 0x00000008
@@ -415,5 +451,17 @@ SDR_CTRLGRP_MPTHRESHOLDRST_MPTHRESHOLDRST_2_THRESHOLDRSTCYCLES_79_64_MASK \
 /* Field instance: sdr::ctrlgrp::dramsts                                   */
 #define SDR_CTRLGRP_DRAMSTS_DBEERR_MASK 0x00000008
 #define SDR_CTRLGRP_DRAMSTS_SBEERR_MASK 0x00000004
+
+/* To determine the duration of SDRAM test */
+/* quick test which run around 5s */
+#define SDRAM_TEST_FAST		0
+/* normal test which run around 30s */
+#define SDRAM_TEST_NORMAL	1
+/* long test which run in minutes */
+#define SDRAM_TEST_LONG		2
+
+/* SDRAM width macro for configuration with ECC */
+#define SDRAM_WIDTH_32BIT_WITH_ECC	40
+#define SDRAM_WIDTH_16BIT_WITH_ECC	24
 
 #endif /* _SDRAM_H_ */

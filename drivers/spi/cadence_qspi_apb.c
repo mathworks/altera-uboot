@@ -341,20 +341,23 @@ void cadence_qspi_apb_controller_disable(void *reg_base)
 /* Return 1 if idle, otherwise return 0 (busy). */
 static unsigned int cadence_qspi_wait_idle(void *reg_base)
 {
-	unsigned int i = 0;
-	unsigned int count = 0;
+	unsigned int start, count = 0;
+	/* timeout in unit of ms */
+	unsigned int timeout = 5000;
 
-	for (i = 0; i < CQSPI_REG_RETRY; i++) {
-		if (CQSPI_REG_IS_IDLE(reg_base)) {
-			/* Read few times in succession to ensure it does
-			not transition low again */
+	reset_timer();
+	start = get_timer(0);
+	for ( ; get_timer(start) < timeout ; ) {
+		if (CQSPI_REG_IS_IDLE(reg_base))
 			count++;
-			mdelay(1);
-			if (count >= CQSPI_POLL_IDLE_RETRY)
-				return 1;
-		} else {
+		else
 			count = 0;
-		}
+		/*
+		 * Ensure the QSPI controller is in true idle state after
+		 * reading back the same idle status consecutively
+		 */
+		if (count >= CQSPI_POLL_IDLE_RETRY)
+			return 1;
 	}
 
 	/* Timeout, still in busy mode. */
@@ -406,8 +409,14 @@ void cadence_qspi_apb_config_baudrate_div(void *reg_base,
 	/* Check if even number. */
 	if ((div & 1))
 		div = (div / 2);
-	else
-		div = (div / 2) - 1;
+	else {
+		if (ref_clk_hz % sclk_hz)
+			/* ensure generated SCLK doesn't exceed user
+			specified sclk_hz */
+			div = (div / 2);
+		else
+			div = (div / 2) - 1;
+	}
 
 	debug("%s: ref_clk %dHz sclk %dHz Div 0x%x\n", __func__,
 		ref_clk_hz, sclk_hz, div);
@@ -672,17 +681,22 @@ int cadence_qspi_apb_indirect_read_setup(void *reg_base,
 	unsigned int addr_value;
 	unsigned int dummy_clk;
 	unsigned int dummy_bytes;
-#if (CONFIG_CQSPI_4BYTE_ADDR == 1)
-	unsigned addr_bytes = 4;
-#else
-	unsigned addr_bytes = 3;
-#endif
+	unsigned int addr_bytes;
 
-	if ((addr_bytes == 3 && cmdlen < 4) ||
-		(addr_bytes == 4 && cmdlen < 5)) {
-		printf("QSPI: Invalid txbuf length, length %d\n", cmdlen);
-		return -EINVAL;
-	}
+	/*
+	 * Identify addr_byte. All NOR flash device drivers are using fast read
+	 * which always expecting 1 dummy byte, 1 cmd byte and 3/4 addr byte.
+	 * With that, the length is in value of 5 or 6. Only FRAM chip from
+	 * ramtron using normal read (which won't need dummy byte).
+	 * Unlikely NOR flash using normal read due to performance issue.
+	 */
+	if (cmdlen >= 5)
+		/* to cater fast read where cmd + addr + dummy */
+		addr_bytes = cmdlen - 2;
+	else
+		/* for normal read (only ramtron as of now) */
+		addr_bytes = cmdlen - 1;
+
 	/* Setup the indirect trigger address */
 	CQSPI_WRITEL((ahb_phy_addr & CQSPI_INDIRECTTRIGGER_ADDR_MASK),
 		reg_base + CQSPI_REG_INDIRECTTRIGGER);
@@ -869,11 +883,6 @@ failwr:
 void cadence_qspi_apb_enter_xip(void *reg_base, char xip_dummy)
 {
 	unsigned int reg;
-#if (CONFIG_CQSPI_4BYTE_ADDR == 1)
-	unsigned addr_bytes = 4;
-#else
-	unsigned addr_bytes = 3;
-#endif
 
 	/* enter XiP mode immediately and enable direct mode */
 	reg = CQSPI_READL(reg_base + CQSPI_REG_CONFIG);
@@ -889,10 +898,4 @@ void cadence_qspi_apb_enter_xip(void *reg_base, char xip_dummy)
 	reg = CQSPI_READL(reg_base + CQSPI_REG_RD_INSTR);
 	reg |= (1 << CQSPI_REG_RD_INSTR_MODE_EN_LSB);
 	CQSPI_WRITEL(reg, reg_base + CQSPI_REG_RD_INSTR);
-
-	/* set device size */
-	reg = CQSPI_READL(reg_base + CQSPI_REG_SIZE);
-	reg &= ~CQSPI_REG_SIZE_ADDRESS_MASK;
-	reg |= (addr_bytes - 1);
-	CQSPI_WRITEL(reg, reg_base + CQSPI_REG_SIZE);
 }

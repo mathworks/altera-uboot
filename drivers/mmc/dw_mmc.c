@@ -249,7 +249,10 @@ static int dwmci_setup_bus(struct dwmci_host *host, u32 freq)
 		return -EINVAL;
 	}
 
-	div = DIV_ROUND_UP(sclk, 2 * freq);
+	if (sclk == freq)
+		div = 0;	/* bypass mode */
+	else
+		div = DIV_ROUND_UP(sclk, 2 * freq);
 
 	dwmci_writel(host, DWMCI_CLKENA, 0);
 	dwmci_writel(host, DWMCI_CLKSRC, 0);
@@ -354,9 +357,9 @@ int add_dwmci(struct dwmci_host *host, u32 max_clk, u32 min_clk)
 	struct mmc *mmc;
 	int err = 0;
 
-	mmc = malloc(sizeof(struct mmc));
+	mmc = calloc(sizeof(struct mmc), 1);
 	if (!mmc) {
-		printf("mmc malloc fail!\n");
+		printf("mmc calloc fail!\n");
 		return -1;
 	}
 

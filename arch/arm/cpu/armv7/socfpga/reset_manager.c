@@ -54,8 +54,8 @@ int is_wdt_in_reset(void)
 void reset_cpu(ulong addr)
 {
 	/* request a warm reset */
-	writel((1 << RSTMGR_CTRL_SWWARMRSTREQ_LSB),
-		&reset_manager_base->ctrl);
+	setbits_le32(&reset_manager_base->ctrl,
+		     (1 << RSTMGR_CTRL_SWWARMRSTREQ_LSB));
 	/*
 	 * infinite loop here as watchdog will trigger and reset
 	 * the processor
@@ -123,11 +123,19 @@ void reset_assert_all_bridges(void)
 #endif
 }
 
-/* Assert reset to all peripherals through reset manager */
+/* Assert reset to all peripherals except l4wd0 through reset manager */
 void reset_assert_all_peripherals_except_l4wd0(void)
 {
-	writel(~(1<<RSTMGR_PERMODRST_L4WD0_LSB),
+	writel(~(1 << RSTMGR_PERMODRST_L4WD0_LSB),
 		&reset_manager_base->per_mod_reset);
+}
+
+/* Assert reset to all peripherals except l4wd0 and sdr through reset manager */
+void reset_assert_all_peripherals_except_l4wd0_and_sdr(void)
+{
+	writel(~((1 << RSTMGR_PERMODRST_L4WD0_LSB) |
+	       (1 << RSTMGR_PERMODRST_SDR_LSB)),
+	       &reset_manager_base->per_mod_reset);
 }
 
 /* Below function only applicable for SPL */
@@ -268,7 +276,7 @@ void reset_deassert_bridges_handoff(void)
 	unsigned brgmodrst = 0;
 	unsigned remap_val = L3REGS_REMAP_OCRAM_MASK;
 
-#if (CONFIG_HPS_RESET_ASSERT_HPS2FPGA == 1)
+#if (CONFIG_HPS_RESET_ASSERT_HPS2FPGA == 1 && CONFIG_PRELOADER_EXE_ON_FPGA == 0)
 	brgmodrst |= RSTMGR_BRGMODRST_HPS2FPGA_MASK;
 #else
 	remap_val |= L3REGS_REMAP_HPS2FPGA_MASK;
@@ -281,6 +289,7 @@ void reset_deassert_bridges_handoff(void)
 #if (CONFIG_HPS_RESET_ASSERT_FPGA2HPS == 1)
 	brgmodrst |= RSTMGR_BRGMODRST_FPGA2HPS_MASK;
 #endif
+
 	writel(brgmodrst, ISWGRP_HANDOFF_AXIBRIDGE);
 	writel(remap_val, ISWGRP_HANDOFF_L3REMAP);
 

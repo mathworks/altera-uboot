@@ -18,41 +18,54 @@
 #ifndef	_CLOCK_MANAGER_H_
 #define	_CLOCK_MANAGER_H_
 
+#ifndef __ASSEMBLY__
+
+#include <asm/io.h>
+
 typedef struct {
 	/* main group */
-	uint32_t main_vco_base;
-	uint32_t mpuclk;
-	uint32_t mainclk;
-	uint32_t dbgatclk;
-	uint32_t mainqspiclk;
-	uint32_t mainnandsdmmcclk;
-	uint32_t cfg2fuser0clk;
-	uint32_t maindiv;
-	uint32_t dbgdiv;
-	uint32_t tracediv;
-	uint32_t l4src;
+	uint32_t	main_vco_base;
+	uint32_t	mpuclk;
+	uint32_t	mainclk;
+	uint32_t	dbgatclk;
+	uint32_t	mainqspiclk;
+	uint32_t	mainnandsdmmcclk;
+	uint32_t	cfg2fuser0clk;
+	uint32_t	maindiv;
+	uint32_t	dbgdiv;
+	uint32_t	tracediv;
+	uint32_t	l4src;
 
 	/* peripheral group */
-	uint32_t peri_vco_base;
-	uint32_t emac0clk;
-	uint32_t emac1clk;
-	uint32_t perqspiclk;
-	uint32_t pernandsdmmcclk;
-	uint32_t perbaseclk;
-	uint32_t s2fuser1clk;
-	uint32_t perdiv;
-	uint32_t gpiodiv;
-	uint32_t persrc;
+	uint32_t	peri_vco_base;
+	uint32_t	emac0clk;
+	uint32_t	emac1clk;
+	uint32_t	perqspiclk;
+	uint32_t	pernandsdmmcclk;
+	uint32_t	perbaseclk;
+	uint32_t	s2fuser1clk;
+	uint32_t	perdiv;
+	uint32_t	gpiodiv;
+	uint32_t	persrc;
 
 	/* sdram pll group */
-	uint32_t sdram_vco_base;
-	uint32_t ddrdqsclk;
-	uint32_t ddr2xdqsclk;
-	uint32_t ddrdqclk;
-	uint32_t s2fuser2clk;
+	uint32_t	sdram_vco_base;
+	uint32_t	ddrdqsclk;
+	uint32_t	ddr2xdqsclk;
+	uint32_t	ddrdqclk;
+	uint32_t	s2fuser2clk;
 } cm_config_t;
 
-extern int cm_basic_init(const cm_config_t *cfg);
+extern int cm_basic_init(const cm_config_t *cfg, uint32_t skip_sdram_pll);
+unsigned long cm_get_mpu_clk_hz(void);
+unsigned long cm_get_sdram_clk_hz(void);
+unsigned long cm_get_l4_sp_clk_hz(void);
+unsigned long cm_get_mmc_controller_clk_hz(void);
+unsigned long cm_get_qspi_controller_clk_hz(void);
+void cm_print_clock_quick_summary(void);
+void cm_derive_clocks_for_drivers(void);
+
+#endif /* __ASSEMBLY__ */
 
 #define CLKMGR_CTRL_ADDRESS 0x0
 #define CLKMGR_BYPASS_ADDRESS 0x4
@@ -95,6 +108,8 @@ extern int cm_basic_init(const cm_config_t *cfg);
 #define CLKMGR_SDRPLLGRP_DDRDQCLK_ADDRESS 0xd0
 #define CLKMGR_SDRPLLGRP_S2FUSER2CLK_ADDRESS 0xd4
 #define CLKMGR_SDRPLLGRP_EN_ADDRESS 0xd8
+#define CLKMGR_ALTERAGRP_MPUCLK 0xe0
+#define CLKMGR_ALTERAGRP_MAINCLK 0xe4
 
 #define CLKMGR_MAINPLLGRP_EN_S2FUSER0CLK_MASK 0x00000200
 #define CLKMGR_MAINPLLGRP_EN_DBGTIMERCLK_MASK 0x00000080
@@ -128,6 +143,7 @@ extern int cm_basic_init(const cm_config_t *cfg);
 #define CLKMGR_MAINPLLGRP_MPUCLK_CNT_SET(x) (((x) << 0) & 0x000001ff)
 #define CLKMGR_MAINPLLGRP_MAINCLK_CNT_SET(x) (((x) << 0) & 0x000001ff)
 #define CLKMGR_MAINPLLGRP_DBGATCLK_CNT_SET(x) (((x) << 0) & 0x000001ff)
+#define CLKMGR_MAINPLLGRP_PERNANDSDMMCCLK_CNT_SET(x) (((x) << 0) & 0x000001ff)
 #define CLKMGR_MAINPLLGRP_CFGS2FUSER0CLK_CNT_SET(x) \
 	(((x) << 0) & 0x000001ff)
 #define CLKMGR_PERPLLGRP_EMAC0CLK_CNT_SET(x) (((x) << 0) & 0x000001ff)
@@ -186,6 +202,9 @@ extern int cm_basic_init(const cm_config_t *cfg);
 #define CLKMGR_SDRPLLGRP_DDR2XDQSCLK_CNT_MASK 0x000001ff
 #define CLKMGR_SDRPLLGRP_DDRDQCLK_CNT_MASK 0x000001ff
 #define CLKMGR_SDRPLLGRP_S2FUSER2CLK_CNT_MASK 0x000001ff
+#define CLKMGR_INTER_SDRPLLLOST_MASK 0x00000020
+#define CLKMGR_INTER_PERPLLLOST_MASK 0x00000010
+#define CLKMGR_INTER_MAINPLLLOST_MASK 0x00000008
 
 #define MAIN_VCO_BASE \
 	(CLKMGR_MAINPLLGRP_VCO_DENOM_SET(\
@@ -208,5 +227,51 @@ extern int cm_basic_init(const cm_config_t *cfg);
 	CONFIG_HPS_SDRPLLGRP_VCO_DENOM) | \
 	CLKMGR_SDRPLLGRP_VCO_NUMER_SET(\
 	CONFIG_HPS_SDRPLLGRP_VCO_NUMER))
+
+#define CLKMGR_MAINPLLGRP_VCO_DENOM_GET(x)	(((x) & 0x003f0000) >> 16)
+#define CLKMGR_MAINPLLGRP_VCO_NUMER_GET(x)	(((x) & 0x0000fff8) >> 3)
+#define CLKMGR_MAINPLLGRP_L4SRC_L4SP_GET(x)	(((x) & 0x00000002) >> 1)
+#define CLKMGR_MAINPLLGRP_MAINDIV_L4SPCLK_GET(x)  (((x) & 0x00000380) >> 7)
+#define CLKMGR_SDRPLLGRP_VCO_SSRC_GET(x)	(((x) & 0x00c00000) >> 22)
+#define CLKMGR_SDRPLLGRP_VCO_DENOM_GET(x)	(((x) & 0x003f0000) >> 16)
+#define CLKMGR_SDRPLLGRP_VCO_NUMER_GET(x)	(((x) & 0x0000fff8) >> 3)
+#define CLKMGR_SDRPLLGRP_DDRDQSCLK_CNT_GET(x)	(((x) & 0x000001ff) >> 0)
+#define CLKMGR_PERPLLGRP_VCO_SSRC_GET(x)	(((x) & 0x00c00000) >> 22)
+#define CLKMGR_PERPLLGRP_VCO_DENOM_GET(x)	(((x) & 0x003f0000) >> 16)
+#define CLKMGR_PERPLLGRP_VCO_NUMER_GET(x)	(((x) & 0x0000fff8) >> 3)
+#define CLKMGR_PERPLLGRP_SRC_QSPI_GET(x)	(((x) & 0x00000030) >> 4)
+#define CLKMGR_PERPLLGRP_SRC_SDMMC_GET(x)	(((x) & 0x00000003) >> 0)
+
+#define CLKMGR_VCO_SSRC_EOSC1		0x0
+#define CLKMGR_VCO_SSRC_EOSC2		0x1
+#define CLKMGR_VCO_SSRC_F2S		0x2
+#define CLKMGR_L4_SP_CLK_SRC_MAINPLL	0x0
+#define CLKMGR_L4_SP_CLK_SRC_PERPLL	0x1
+#define CLKMGR_SDMMC_CLK_SRC_F2S	0x0
+#define CLKMGR_SDMMC_CLK_SRC_MAIN	0x1
+#define CLKMGR_SDMMC_CLK_SRC_PER	0x2
+#define CLKMGR_QSPI_CLK_SRC_F2S		0x0
+#define CLKMGR_QSPI_CLK_SRC_MAIN	0x1
+#define CLKMGR_QSPI_CLK_SRC_PER		0x2
+
+#ifndef __ASSEMBLY__
+/* global variable which consume by drivers */
+extern unsigned long cm_l4_sp_clock __attribute__((section(".data")));
+extern unsigned long cm_sdmmc_clock __attribute__((section(".data")));
+extern unsigned long cm_qspi_clock __attribute__((section(".data")));
+#endif /* __ASSEMBLY__ */
+
+/* Bypass Main and Per PLL, bypass source per input mux */
+#define CLKMGR_BYPASS_MAIN_PER_PLL_MASK		0x19
+
+#define CLKMGR_MAINQSPICLK_RESET_VALUE		0x3
+#define CLKMGR_MAINNANDSDMMCCLK_RESET_VALUE	0x3
+#define CLKMGR_PERQSPICLK_RESET_VALUE		0x1
+#define CLKMGR_PERNANDSDMMCCLK_RESET_VALUE	0x1
+
+/* Bit masks for dbctrl register */
+#define CLKMGR_DBCTRL_ENSFMDWR_MASK 0x00000002
+#define CLKMGR_DBCTRL_STAYOSC1_MASK 0x00000001
+
 
 #endif /* _CLOCK_MANAGER_H_ */

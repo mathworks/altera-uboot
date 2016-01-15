@@ -152,7 +152,7 @@ SYSMGR.ISWGRP.HANDOFF1	- hps l3 remap (L3REGS.REMAP)
 SYSMGR.ISWGRP.HANDOFF2	- hps peripheral controller to fpga bridge
 				(SYSMGR.FPGAINTF.MODULE)
 SYSMGR.ISWGRP.HANDOFF3	- fpga to hps sdram bridge (SDR.CTRLGRP.FPGAPORTRST)
-SYSMGR.ISWGRP.HANDOFF4	- unused
+SYSMGR.ISWGRP.HANDOFF4	- row bits handed off by Altera tools
 SYSMGR.ISWGRP.HANDOFF5	- unused
 SYSMGR.ISWGRP.HANDOFF6	- unused
 SYSMGR.ISWGRP.HANDOFF7	- unused
@@ -182,8 +182,8 @@ that used to generate Preloader handoff.
 
 where bridge_enable_handoff will execute below steps
 > mw $fpgaintf $fpgaintf_handoff
-> mw $fpga2sdram $fpga2sdram_handoff
 > go $fpga2sdram_apply
+> mw $fpga2sdram $fpga2sdram_handoff
 > mw $axibridge $axibridge_handoff
 > mw $l3remap $l3remap_handoff
 > md $fpgaintf
@@ -208,8 +208,8 @@ For HPS peripheral controller to FPGA interface
 > mw $fpgaintf <my_fpgaintf_new_value>
 
 For FPGA to SDRAM bridge
-> mw $fpga2sdram <my_fpga2sdram_new_value>
 > go $fpga2sdram_apply
+> mw $fpga2sdram <my_fpga2sdram_new_value>
 
 For AXI bridges (HPS2FPGA, LWHPS2FPGA, FPGA2HPS)
 > mw $axibridge <my_axibridge_new_value>
@@ -217,3 +217,116 @@ For AXI bridges (HPS2FPGA, LWHPS2FPGA, FPGA2HPS)
 
 * To understand the value required, please refer to address map info page at
 http://www.altera.com/literature/hb/cyclone-v/hps.html
+
+
+
+NAND support
+----------------------------------------
+In SoCFPGA, we are using Denali NAND controller from Cadence. This controller
+implemented HW ECC where it will auto calculate the ECC and append within the
+data during write. During read, it will auto correct when ECC error happen.
+If the error is un-correctable, it will issue interrupt to indicate to the host.
+
+Controller configuration and driver features
+1. Using Main + spare area for data storage
+2. Using 512 byte sectors protected with 8 bit ECC
+3. To ensure minimum data transfer latency, the driver is utilizing the DMA
+   to read and write to the NAND flash.
+4. Bad block management with bad block table located at end of flash
+
+Example layout for NAND flash
+For standard 2048 data + 128 spare page flash (default)
+a. 1st Preloader image - 0x0
+b. 2nd Preloader image - 0x20000
+c. 3rd Preloader image - 0x40000
+d. 4th Preloader image - 0x60000
+e. U-Boot environment - 0x80000
+f. DTB image - 0xA0000
+g. U-Boot image - 0xC0000
+h. Linux zImage - 0x120000
+.
+For standard 4096 data page flash
+a. 1st Preloader image - 0x0
+b. 2nd Preloader image - 0x40000
+c. 3rd Preloader image - 0x80000
+d. 4th Preloader image - 0xC0000
+e. U-Boot environment - 0x100000
+f. DTB image - 0x140000
+g. U-Boot image - 0x180000
+h. Linux zImage - 0x200000
+
+Preloader driver configuration
+For Preloader, its design to support multiple NAND device include
+non ONFI. With that, you would need to configure below macro according to
+the NAND flash used
+
+Location: board/altera/socfpga/build.h
+#define CONFIG_PRELOADER_BOOT_FROM_NAND		(1)
+#define CONFIG_PRELOADER_NAND_NEXT_BOOT_IMAGE	(0xC0000)
+
+Location: include/configs/socfpga_common.h
+#define CONFIG_SYS_NAND_PAGE_SIZE	2048
+#define CONFIG_SYS_NAND_OOBSIZE		64
+#define CONFIG_SYS_NAND_BLOCK_SIZE	(128 * 1024)
+/ number of pages per block /
+#define CONFIG_SYS_NAND_PAGE_COUNT	64
+
+U-Boot driver configuration
+For U-Boot, no configuration is required as it will pick the info through
+ONFI signature. While for non ONFI part, it should be based on existing table
+listed in NAND base driver. At same time, you would need to configure below
+macro according to the page size of NAND flash used
+
+Location: include/configs/socfpga_common.h
+"nandbootimageaddr=0x120000\0" \
+"nandfdtaddr=0xA0000\0" \
+...
+/ environment setting for NAND /
+#ifdef CONFIG_ENV_IS_IN_NAND
+#define CONFIG_ENV_OFFSET (0x00080000) <---
+#endif
+...
+#define CONFIG_NAND_DENALI
+
+
+HPS EMAC address / EEPROM support
+----------------------------------------
+Within Altera dev kit, there is an EEPROM chip 24LC32A. This chip is being used
+to store board related information which include EMAC address. As of now,
+user have the option to get the EMAC address from below location
+
+1. Environment data that saved within flashes
+   > setenv ethaddr 02:11:22:33:44:55
+   > saveenv
+   After this is done once, U-Boot will set the ethaddr value every time its
+   boot up. This information then passed to kernel.
+
+2. EEPROM
+   Upon boot up, U-Boot will check whether ethaddr environment variable is
+   available. If not, U-Boot will grab it from EEPROM and assign to ethaddr if
+   its valid. At same time, user can invoke it manually using below command.
+   > go $setenv_ethaddr_eeprom
+   After this command being called, U-Boot will grab the EMAC address from
+   EEPROM and set the ethaddr value. This information then passed to kernel.
+
+Per current EEPROM layout, the location of EMAC address is located as below
+- 0x16c for HPS EMAC 0 address
+- 0x174 for HPS EMAC 1 address
+
+To view the EMAC address, you can use the i2c console command as below
+> SOCFPGA_CYCLONE5 # i2c md 0x51 0x174.2 6
+> 0174: 55 44 33 22 11 02    UD3"..
+
+To modify the EMAC address, you can the i2c console command as below
+> SOCFPGA_CYCLONE5 # i2c mm 0x51 0x174.2
+> 00000174: 55 ? 55
+> 00000175: 44 ? 44
+> 00000176: 33 ? 33
+> 00000177: 22 ? 22
+> 00000178: 11 ? 11
+> 00000179: 02 ? 02
+
+< Note if you are not using Altera dev kit >
+Do note that the function which set the ethaddr from EEPROM is located at
+board/altera/socfpga/socfpga_common.c as this is board specific code. You would
+need to copy and modify this code based on your board specific implementation.

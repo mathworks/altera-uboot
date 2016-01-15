@@ -38,10 +38,14 @@
 #include <asm/arch/system_manager.h>
 #include <spi_flash.h>
 #include <asm/arch/fpga_manager.h>
+#include <fat.h>
+#include <fs.h>
+#include <mmc.h>
 
 DECLARE_GLOBAL_DATA_PTR;
 
-#if (CONFIG_PRELOADER_WARMRST_SKIP_CFGIO == 1)
+#if (CONFIG_PRELOADER_WARMRST_SKIP_CFGIO == 1) || \
+(CONFIG_HPS_RESET_WARMRST_HANDSHAKE_SDRAM == 1)
 u32 rst_mgr_status;
 #endif
 
@@ -69,6 +73,8 @@ u32 spl_boot_device(void)
 	return BOOT_DEVICE_SPI;
 #elif (CONFIG_PRELOADER_BOOT_FROM_RAM == 1)
 	return BOOT_DEVICE_RAM;
+#elif (CONFIG_PRELOADER_BOOT_FROM_NAND == 1)
+	return BOOT_DEVICE_NAND;
 #else
 	return BOOT_DEVICE_MMC1;
 #endif
@@ -100,7 +106,7 @@ void spl_program_fpga_qspi(void)
 {
 	struct spi_flash *flash;
 	struct image_header header;
-	u32 flash_addr, status;
+	u32 flash_addr, status, transfer_size;
 	u32 temp[64];
 
 	/* initialize the Quad SPI controller */
@@ -135,21 +141,19 @@ void spl_program_fpga_qspi(void)
 		 * Read the data by small chunk by chunk. At this stage,
 		 * use the temp as temporary buffer.
 		 */
-		 if (spl_image.size > sizeof(temp)) {
-			spi_flash_read(flash, flash_addr,
-				sizeof(temp), temp);
-			/* update the counter */
-			spl_image.size -= sizeof(temp);
-			flash_addr += sizeof(temp);
-		 }  else {
-			spi_flash_read(flash, flash_addr,
-				spl_image.size, temp);
-			spl_image.size = 0;
-		}
+		if (spl_image.size > sizeof(temp))
+			transfer_size = sizeof(temp);
+		else
+			transfer_size = spl_image.size;
+
+		spi_flash_read(flash, flash_addr, transfer_size, temp);
+		/* update the counter */
+		spl_image.size -= transfer_size;
+		flash_addr += transfer_size;
 
 		/* transfer data to FPGA Manager */
 		fpgamgr_program_write((const long unsigned int *)temp,
-			sizeof(temp));
+			transfer_size);
 #ifdef CONFIG_HW_WATCHDOG
 		WATCHDOG_RESET();
 #endif
@@ -189,11 +193,136 @@ void spl_program_fpga_qspi(void)
 }
 #endif
 
+#if defined(CONFIG_SPL_FPGA_LOAD) && defined(CONFIG_SPL_MMC_SUPPORT)
+/* program FPGA where rbf file is located at FAT partition with SD */
+void spl_program_fpga_sd_fat(void)
+{
+	u32 filesize, status;
+	const u32 temp_sdram = 0x2000000;
+	struct mmc *mmc;
+
+	/* initialize the MMC controller */
+	mmc_initialize(gd->bd);
+
+	/* We register only one device. So, the dev id is always 0 */
+	mmc = find_mmc_device(0);
+	if (!mmc) {
+		puts("spl: mmc device not found!!\n");
+		hang();
+	}
+
+#ifdef CONFIG_HW_WATCHDOG
+	WATCHDOG_RESET();
+#endif
+
+	status = mmc_init(mmc);
+	if (status) {
+		printf("spl: mmc init failed: err - %d\n", status);
+		hang();
+	}
+
+	status = fat_register_device(&mmc->block_dev,
+				CONFIG_SYS_MMC_SD_FAT_BOOT_PARTITION);
+	if (status) {
+		printf("spl: fat register err - %d\n", status);
+		hang();
+	}
+
+#ifdef CONFIG_HW_WATCHDOG
+	WATCHDOG_RESET();
+#endif
+
+	/* do memory padding as data in SDRAM */
+	filesize = file_fat_read(CONFIG_SPL_FPGA_FAT_NAME, NULL, 0);
+	if (filesize != -1) {
+		memset((unsigned char *)((temp_sdram + filesize)
+			& ~(CONFIG_SPL_SDRAM_ECC_PADDING - 1)),
+			0, CONFIG_SPL_SDRAM_ECC_PADDING);
+	}
+
+#ifdef CONFIG_HW_WATCHDOG
+	WATCHDOG_RESET();
+#endif
+
+	filesize = file_fat_read(CONFIG_SPL_FPGA_FAT_NAME,
+					(u8 *)temp_sdram, 0);
+	if (filesize == -1) {
+		printf("Error - " CONFIG_SPL_FPGA_FAT_NAME
+			" not found within SDMMC FAT parition\n");
+		hang();
+	}
+
+#ifdef CONFIG_HW_WATCHDOG
+	WATCHDOG_RESET();
+#endif
+	/* initialize the FPGA Manager */
+	status = fpgamgr_program_init();
+	if (status) {
+		printf("FPGA: Init failed with error code %d\n", status);
+		hang();
+	}
+
+#ifdef CONFIG_HW_WATCHDOG
+	WATCHDOG_RESET();
+#endif
+	/* transfer data to FPGA Manager */
+	fpgamgr_program_write((const long unsigned int *)temp_sdram, filesize);
+
+#ifdef CONFIG_HW_WATCHDOG
+	WATCHDOG_RESET();
+#endif
+
+	/* Ensure the FPGA entering config done */
+	status = fpgamgr_program_poll_cd();
+	if (status) {
+		printf("FPGA: Poll CD failed with error code %d\n", status);
+		hang();
+	}
+
+#ifdef CONFIG_HW_WATCHDOG
+	WATCHDOG_RESET();
+#endif
+
+	/* Ensure the FPGA entering init phase */
+	status = fpgamgr_program_poll_initphase();
+	if (status) {
+		printf("FPGA: Poll initphase failed with error code %d\n",
+			status);
+		hang();
+	}
+#ifdef CONFIG_HW_WATCHDOG
+	WATCHDOG_RESET();
+#endif
+
+	/* Ensure the FPGA entering user mode */
+	status = fpgamgr_program_poll_usermode();
+	if (status) {
+		printf("FPGA: Poll usermode failed with error code %d\n",
+			status);
+		hang();
+	}
+#ifdef CONFIG_HW_WATCHDOG
+	WATCHDOG_RESET();
+#endif
+	free(mmc);
+}
+#endif
+
 /*
  * Board initialization after bss clearance
  */
 void spl_board_init(void)
 {
+#if (CONFIG_HPS_RESET_WARMRST_HANDSHAKE_SDRAM == 1)
+	const int warmrst_preserve_sdram = 1;
+#else
+	const int warmrst_preserve_sdram = 0;
+#endif
+
+#if (CONFIG_PRELOADER_SKIP_SDRAM == 0)
+	unsigned long sdram_size;
+#endif
+
 #ifndef CONFIG_SOCFPGA_VIRTUAL_TARGET
 	cm_config_t cm_default_cfg = {
 		/* main group */
@@ -206,7 +335,7 @@ void spl_board_init(void)
 			CONFIG_HPS_MAINPLLGRP_DBGATCLK_CNT),
 		CLKMGR_MAINPLLGRP_MAINQSPICLK_CNT_SET(
 			CONFIG_HPS_MAINPLLGRP_MAINQSPICLK_CNT),
-		CLKMGR_PERPLLGRP_PERNANDSDMMCCLK_CNT_SET(
+		CLKMGR_MAINPLLGRP_PERNANDSDMMCCLK_CNT_SET(
 			CONFIG_HPS_MAINPLLGRP_MAINNANDSDMMCCLK_CNT),
 		CLKMGR_MAINPLLGRP_CFGS2FUSER0CLK_CNT_SET(
 			CONFIG_HPS_MAINPLLGRP_CFGS2FUSER0CLK_CNT),
@@ -294,8 +423,10 @@ void spl_board_init(void)
 		FREEZE_CONTROLLER_FSM_SW);
 	sys_mgr_frzctrl_freeze_req(FREEZE_CHANNEL_2,
 		FREEZE_CONTROLLER_FSM_SW);
-	sys_mgr_frzctrl_freeze_req(FREEZE_CHANNEL_3,
-		FREEZE_CONTROLLER_FSM_SW);
+	if ((warmrst_preserve_sdram == 0) ||
+		(rst_mgr_status & RSTMGR_COLDRST_MASK) != 0)
+			sys_mgr_frzctrl_freeze_req(FREEZE_CHANNEL_3,
+				FREEZE_CONTROLLER_FSM_SW);
 #endif /* CONFIG_SOCFPGA_VIRTUAL_TARGET */
 
 
@@ -303,12 +434,18 @@ void spl_board_init(void)
 	WATCHDOG_RESET();
 #endif
 	DEBUG_MEMORY
-	debug("Asserting reset to all except L4WD and SDRAM\n");
 	/*
 	 * assert all peripherals and bridges to reset. This is
 	 * to ensure no glitch happen during PLL re-configuration
 	 */
-	reset_assert_all_peripherals_except_l4wd0();
+	if ((warmrst_preserve_sdram == 0) ||
+		(rst_mgr_status & RSTMGR_COLDRST_MASK) != 0) {
+		debug("Asserting reset to all except L4WD\n");
+		reset_assert_all_peripherals_except_l4wd0();
+	} else if ((rst_mgr_status & RSTMGR_COLDRST_MASK) == 0) {
+		debug("Asserting reset to all except L4WD and SDRAM\n");
+		reset_assert_all_peripherals_except_l4wd0_and_sdr();
+	}
 #if (CONFIG_PRELOADER_EXE_ON_FPGA == 0)
 	reset_assert_all_bridges();
 #endif
@@ -332,9 +469,23 @@ void spl_board_init(void)
 	WATCHDOG_RESET();
 #endif
 	DEBUG_MEMORY
+
+#if (CONFIG_PRELOADER_EXE_ON_FPGA == 0) && (CONFIG_PRELOADER_RAMBOOT_PLLRESET == 1)
+	debug("RAM boot setup if CSEL 0\n");
+	ram_boot_setup();
+#endif
+
 	debug("Reconfigure Clock Manager\n");
 	/* reconfigure the PLLs */
-	cm_basic_init(&cm_default_cfg);
+	if ((warmrst_preserve_sdram == 0) ||
+		(rst_mgr_status & RSTMGR_COLDRST_MASK) != 0) {
+		cm_basic_init(&cm_default_cfg, 0);
+	} else if ((rst_mgr_status & RSTMGR_COLDRST_MASK) == 0) {
+		cm_basic_init(&cm_default_cfg, 1);
+	}
+
+	/* calculate the clock frequencies required for drivers */
+	cm_derive_clocks_for_drivers();
 
 #ifdef CONFIG_HW_WATCHDOG
 	WATCHDOG_RESET();
@@ -344,7 +495,7 @@ void spl_board_init(void)
 #if (CONFIG_PRELOADER_WARMRST_SKIP_CFGIO == 1)
 	if (((readl(CONFIG_SYSMGR_ROMCODEGRP_CTRL) &
 	SYSMGR_ROMCODEGRP_CTRL_WARMRSTCFGIO) == 0) ||
-	((rst_mgr_status & RSTMGR_WARMRST_MASK) == 0)) {
+	((rst_mgr_status & RSTMGR_COLDRST_MASK) != 0)) {
 #endif /* CONFIG_PRELOADER_WARMRST_SKIP_CFGIO */
 #if (CONFIG_PRELOADER_BOOTROM_HANDSHAKE_CFGIO == 1)
 		/* Enable handshake bit with BootROM */
@@ -365,10 +516,11 @@ void spl_board_init(void)
 			IO_SCAN_CHAIN_2,
 			CONFIG_HPS_IOCSR_SCANCHAIN2_LENGTH,
 			iocsr_scan_chain2_table);
-		scan_mgr_io_scan_chain_prg(
-			IO_SCAN_CHAIN_3,
-			CONFIG_HPS_IOCSR_SCANCHAIN3_LENGTH,
-			iocsr_scan_chain3_table);
+		if ((warmrst_preserve_sdram == 0) ||
+			(rst_mgr_status & RSTMGR_COLDRST_MASK) != 0)
+			scan_mgr_io_scan_chain_prg(IO_SCAN_CHAIN_3,
+				CONFIG_HPS_IOCSR_SCANCHAIN3_LENGTH,
+				iocsr_scan_chain3_table);
 #if (CONFIG_PRELOADER_BOOTROM_HANDSHAKE_CFGIO == 1)
 		/* Clear handshake bit with BootROM */
 		DEBUG_MEMORY
@@ -387,7 +539,7 @@ void spl_board_init(void)
 	/* Skip configuration is warm reset happen and WARMRSTCFGPINMUX set */
 	if (((readl(CONFIG_SYSMGR_ROMCODEGRP_CTRL) &
 	SYSMGR_ROMCODEGRP_CTRL_WARMRSTCFGPINMUX) == 0) ||
-	((rst_mgr_status & RSTMGR_WARMRST_MASK) == 0)) {
+	((rst_mgr_status & RSTMGR_COLDRST_MASK) != 0)) {
 #endif /* CONFIG_PRELOADER_WARMRST_SKIP_CFGIO */
 #if (CONFIG_PRELOADER_BOOTROM_HANDSHAKE_CFGIO == 1)
 		/* Enable handshake bit with BootROM */
@@ -407,6 +559,12 @@ void spl_board_init(void)
 #endif /* CONFIG_PRELOADER_WARMRST_SKIP_CFGIO */
 #endif /* CONFIG_SOCFPGA_VIRTUAL_TARGET */
 
+	/*
+	 * If SDMMC PWREN is used, we need to ensure BootROM always reconfigure
+	 * IOCSR and pinmux after warm reset. This is to cater the use case
+	 * of board design which is using SDMMC PWREN pins.
+	 */
+	sysmgr_sdmmc_pweren_mux_check();
 
 #ifdef CONFIG_HW_WATCHDOG
 	WATCHDOG_RESET();
@@ -419,10 +577,7 @@ void spl_board_init(void)
 #else
 	reset_deassert_all_peripherals();
 #endif
-#if (CONFIG_PRELOADER_EXE_ON_FPGA == 0)
 	reset_deassert_bridges_handoff();
-#endif
-
 
 #ifndef CONFIG_SOCFPGA_VIRTUAL_TARGET
 #ifdef CONFIG_HW_WATCHDOG
@@ -437,8 +592,10 @@ void spl_board_init(void)
 		FREEZE_CONTROLLER_FSM_SW);
 	sys_mgr_frzctrl_thaw_req(FREEZE_CHANNEL_2,
 		FREEZE_CONTROLLER_FSM_SW);
-	sys_mgr_frzctrl_thaw_req(FREEZE_CHANNEL_3,
-		FREEZE_CONTROLLER_FSM_SW);
+	if ((warmrst_preserve_sdram == 0) ||
+		(rst_mgr_status & RSTMGR_COLDRST_MASK) != 0)
+		sys_mgr_frzctrl_thaw_req(FREEZE_CHANNEL_3,
+					 FREEZE_CONTROLLER_FSM_SW);
 #endif	/* CONFIG_SOCFPGA_VIRTUAL_TARGET */
 
 
@@ -451,8 +608,19 @@ void spl_board_init(void)
 	preloader_console_init();
 	/* printout to know the board configuration during run time */
 	checkboard();
+
+	/* printout the clock info */
+	cm_print_clock_quick_summary();
 #endif
 
+	if ((rst_mgr_status & RSTMGR_COLDRST_MASK) != 0)
+		puts("RESET: COLD\n");
+	else
+		puts("RESET: WARM\n");
+
+#ifdef CONFIG_HW_WATCHDOG
+	puts("INFO : Watchdog enabled\n");
+#endif
 
 #ifndef CONFIG_SOCFPGA_VIRTUAL_TARGET
 #ifndef CONFIG_PRELOADER_SKIP_SDRAM
@@ -463,30 +631,84 @@ void spl_board_init(void)
 	WATCHDOG_RESET();
 #endif
 	DEBUG_MEMORY
-	puts("SDRAM: Initializing MMR registers\n");
-	/* SDRAM MMR initialization */
-	if (sdram_mmr_init_full() != 0)
-		hang();
+	if ((warmrst_preserve_sdram == 0) ||
+		(rst_mgr_status & RSTMGR_COLDRST_MASK) != 0) {
+		puts("SDRAM: Initializing MMR registers\n");
+		/* SDRAM MMR initialization */
+		if (sdram_mmr_init_full(0xffffffff) != 0)
+			hang();
 
 #ifdef CONFIG_HW_WATCHDOG
-	WATCHDOG_RESET();
+		WATCHDOG_RESET();
 #endif
-	DEBUG_MEMORY
-	puts("SDRAM: Calibrating PHY\n");
-	/* SDRAM calibration */
-	if (sdram_calibration_full() == 0)
-		hang();
+		DEBUG_MEMORY
+		puts("SDRAM: Calibrating PHY\n");
+		/* SDRAM calibration */
+		if (sdram_calibration_full() == 0)
+			hang();
+
+	} else if ((rst_mgr_status & RSTMGR_COLDRST_MASK) == 0) {
+		unsigned int sdr_phy_reg;
+
+		/* Save SDR PHY register value */
+		sdr_phy_reg = readl(SOCFPGA_SDR_ADDRESS +
+				    SDR_CTRLGRP_PHYCTRL_PHYCTRL_0_ADDRESS);
+
+		puts("SDRAM: Initializing MMR registers\n");
+		if (sdram_mmr_init_full(sdr_phy_reg) != 0)
+			hang();
+
+		puts("SDRAM: Skipping calibrating PHY\n");
+
+		/* Check if the self-refresh can be entered */
+		if (sdram_check_self_refresh_seq() != 0) {
+			printf("SDRAM: Self refresh issue detected. Performing Warm reset ...\n");
+			reset_cpu(0);
+		}
+
+		/* Perform dummy read/writes to clear calibration data */
+		readl(0x100010);
+	}
+
+	/* detect the SDRAM size */
+#ifdef CONFIG_SDRAM_CALCULATE_SIZE
+	sdram_size = sdram_calculate_size();
+#else
+	sdram_size = PHYS_SDRAM_1_SIZE;
+#endif
+	printf("SDRAM: %ld MiB\n", (sdram_size >> 20));
+
 #if (CONFIG_PRELOADER_HARDWARE_DIAGNOSTIC == 1)
-	/* a simple sdram memory test */
-	puts("SDRAM : Running simple memory test...");
-	/* start with 1MB region as lowest 1MB is OCRAM */
-	if (get_ram_size((long *)0x100000, PHYS_SDRAM_1_SIZE) !=
-		PHYS_SDRAM_1_SIZE) {
+	/* Sanity check ensure correct SDRAM size specified */
+	puts("SDRAM: Ensuring specified SDRAM size is correct ...");
+	if (get_ram_size(0, sdram_size) != sdram_size) {
 		puts("failed\n");
 		hang();
 	}
 	puts("passed\n");
+	/*
+	 * A simple sdram memory test
+	 * If you want more coverage, change the argument as below
+	 * SDRAM_TEST_FAST -> quick test which run around 5s
+	 * SDRAM_TEST_NORMAL -> normal test which run around 30s
+	 * SDRAM_TEST_LONG -> long test which run in minutes
+	 */
+	if (hps_emif_diag_test(SDRAM_TEST_FAST, 0, sdram_size) == 0)
+		hang();
 #endif /* CONFIG_PRELOADER_HARDWARE_DIAGNOSTIC */
+
+#if (CONFIG_PRELOADER_SDRAM_SCRUBBING == 1)
+	/* scrub the boot region before copying happen */
+	sdram_scrub_boot_region();
+#if (CONFIG_PRELOADER_SDRAM_SCRUB_REMAIN_REGION == 1)
+	/*
+	 * Trigger DMA to scrub remain region so it can run parallel
+	 * with flash loading to minimize the scrubbing time penalty
+	 */
+	sdram_scrub_remain_region_trigger();
+#endif /* CONFIG_PRELOADER_SDRAM_SCRUB_REMAIN_REGION */
+#endif /* CONFIG_PRELOADER_SDRAM_SCRUBBING */
+
 #endif	/* CONFIG_PRELOADER_SKIP_SDRAM */
 
 #ifdef CONFIG_HW_WATCHDOG
@@ -581,8 +803,7 @@ void spl_board_init(void)
 	spl_program_fpga_qspi();
 #elif defined(CONFIG_SPL_MMC_SUPPORT)
 	/* rbf file located within SDMMC */
-#error Preloader FPGA programming support temporarily not supporting RBF file \
-stored within SDMMC card. Please use Quad SPI boot option for this moment.
+	spl_program_fpga_sd_fat();
 #endif
 
 	/* enable signals from hps peripheral controller to fpga
@@ -590,6 +811,8 @@ stored within SDMMC card. Please use Quad SPI boot option for this moment.
 	writel(readl(ISWGRP_HANDOFF_FPGAINTF), SYSMGR_FPGAINTF_MODULE);
 
 	/* enable signals from fpga to hps sdram (based on handoff) */
+	setbits_le32((SOCFPGA_SDR_ADDRESS + SDR_CTRLGRP_STATICCFG_ADDRESS),
+		SDR_CTRLGRP_STATICCFG_APPLYCFG_MASK);
 	writel(readl(ISWGRP_HANDOFF_FPGA2SDR),
 		(SOCFPGA_SDR_ADDRESS + SDR_CTRLGRP_FPGAPORTRST_ADDRESS));
 
