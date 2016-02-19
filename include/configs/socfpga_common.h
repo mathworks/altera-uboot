@@ -168,7 +168,7 @@
 #ifdef CONFIG_SOCFPGA_VIRTUAL_TARGET
 #define CONFIG_BOOTCOMMAND "run ramboot"
 #else
-#define CONFIG_BOOTCOMMAND "run uenv_init; run callscript; run mmcload; run mmcboot"
+#define CONFIG_BOOTCOMMAND "run uenv_init; run callscript; run mmcloadfpga; run mmcload; run mmcboot"
 #endif
 
 /*
@@ -222,6 +222,23 @@
 	"uenv_init=true \0"
 #endif
 
+/* 
+ * Load the FPGA image:
+ */
+#if defined(CONFIG_SOCFPGA_LOAD_FPGA)
+# define CONFIG_SOCFPGA_LOAD_FPGA_CMD \
+	"fpgafile=socfpga.rbf\0" \
+	"mmcloadfpga=" \
+		"mmc rescan;" \
+		"if ${mmcloadcmd} mmc 0:${mmcloadpart} ${fpgadata} ${fpgafile}; then " \
+			"fpga load 0 ${fpgadata} ${filesize};" \
+			"run bridge_enable_handoff;" \
+		"fi;\0"
+#else
+# define CONFIG_SOCFPGA_LOAD_FGPA_CMD \
+	"mmcloadfpga=true \0"
+#endif
+
 #define CONFIG_EXTRA_ENV_SETTINGS \
 	"verify=n\0" \
 	"loadaddr=" __stringify(CONFIG_SYS_LOAD_ADDR) "\0" \
@@ -252,6 +269,7 @@
 		"sf read ${fdtaddr} ${qspifdtaddr} ${fdtimagesize};\0" \
 	CONFIG_INIT_ENV_ONCE \
 	CONFIG_SOCFPGA_BOOTCMDS \
+	CONFIG_SOCFPGA_LOAD_FPGA_CMD \
 	"nandload=nand read ${loadaddr} ${nandbootimageaddr} ${bootimagesize};"\
 		"nand read ${fdtaddr} ${nandfdtaddr} ${fdtimagesize}\0" \
 	"nandboot=setenv bootargs " CONFIG_BOOTARGS \
