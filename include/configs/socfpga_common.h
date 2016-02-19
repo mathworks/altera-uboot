@@ -168,7 +168,7 @@
 #ifdef CONFIG_SOCFPGA_VIRTUAL_TARGET
 #define CONFIG_BOOTCOMMAND "run ramboot"
 #else
-#define CONFIG_BOOTCOMMAND "run callscript; run mmcload; run mmcboot"
+#define CONFIG_BOOTCOMMAND "run uenv_init; run callscript; run mmcload; run mmcboot"
 #endif
 
 /*
@@ -199,6 +199,29 @@
 
 #endif
 
+/* 
+ * Initialize environment:
+ * Run the saveenv command on the first boot to initialize the env
+ * storage.
+ */
+#if defined(CONFIG_ENV_IS_IN_FAT) || defined(CONFIG_ENV_IS_IN_MMC)
+# define CONFIG_CMD_PRE_SAVEENV		"mmc rescan;"
+#else
+# define CONFIG_CMD_PRE_SAVEENV		""
+#endif
+
+#if defined(CONFIG_SOCFPGA_INIT_ENV)
+# define CONFIG_INIT_ENV_ONCE \
+	"uenv_init=" \
+		"echo Storing default uboot environment...;" \
+		"env set uenv_init true;" \
+		CONFIG_CMD_PRE_SAVEENV \
+		"saveenv\0"
+#else
+# define CONFIG_INIT_ENV_ONCE \
+	"uenv_init=true \0"
+#endif
+
 #define CONFIG_EXTRA_ENV_SETTINGS \
 	"verify=n\0" \
 	"loadaddr=" __stringify(CONFIG_SYS_LOAD_ADDR) "\0" \
@@ -227,7 +250,8 @@
 	"qspiload=sf probe ${qspiloadcs};" \
 		"sf read ${loadaddr} ${qspibootimageaddr} ${bootimagesize};" \
 		"sf read ${fdtaddr} ${qspifdtaddr} ${fdtimagesize};\0" \
-    CONFIG_SOCFPGA_BOOTCMDS \
+	CONFIG_INIT_ENV_ONCE \
+	CONFIG_SOCFPGA_BOOTCMDS \
 	"nandload=nand read ${loadaddr} ${nandbootimageaddr} ${bootimagesize};"\
 		"nand read ${fdtaddr} ${nandfdtaddr} ${fdtimagesize}\0" \
 	"nandboot=setenv bootargs " CONFIG_BOOTARGS \
