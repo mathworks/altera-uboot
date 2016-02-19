@@ -19,6 +19,9 @@
 #ifndef __CONFIG_H
 #define __CONFIG_H
 
+/* Initialize the environment storage on first boot */
+#define CONFIG_SOCFPGA_INIT_ENV
+
 #include "../../board/altera/socfpga/build.h"
 #include "../../board/altera/socfpga/pinmux_config.h"
 #include "../../board/altera/socfpga/pll_config.h"
