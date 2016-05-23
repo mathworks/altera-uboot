@@ -21,6 +21,8 @@
 
 /* Initialize the environment storage on first boot */
 #define CONFIG_SOCFPGA_INIT_ENV
+/* Program the FPGA from u-boot */
+#define CONFIG_SOCFPGA_LOAD_FPGA
 
 #include "../../board/altera/socfpga/build.h"
 #include "../../board/altera/socfpga/pinmux_config.h"
