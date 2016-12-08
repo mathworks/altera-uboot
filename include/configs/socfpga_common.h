@@ -168,7 +168,7 @@
 #ifdef CONFIG_SOCFPGA_VIRTUAL_TARGET
 #define CONFIG_BOOTCOMMAND "run ramboot"
 #else
-#define CONFIG_BOOTCOMMAND "run uenv_init; run callscript; run mmcloadfpga; run mmcload; run mmcboot"
+#define CONFIG_BOOTCOMMAND "run uenv_init; run callscript; run mmcloadfpga; run mmcload; run mmcloadramdisk; run mmcboot"
 #endif
 
 /*
@@ -193,10 +193,9 @@
  */
 #define CONFIG_BOOTARGS ""
 #define CONFIG_SOCFPGA_BOOTCMDS \
-    "ramboot=bootz ${loadaddr} - ${fdtaddr}\0" \
-    "mmcboot=bootz ${loadaddr} - ${fdtaddr}\0" \
-    "qspiboot=bootz ${loadaddr} - ${fdtaddr}\0"
-
+    "ramboot=bootz ${loadaddr} ${ramdisk_addr} ${fdtaddr}\0" \
+    "mmcboot=bootz ${loadaddr} ${ramdisk_addr} ${fdtaddr}\0" \
+    "qspiboot=bootz ${loadaddr} ${ramdisk_addr} ${fdtaddr}\0"
 #endif
 
 /* 
@@ -239,12 +238,35 @@
 	"mmcloadfpga=true \0"
 #endif
 
+/* 
+ * Load the FPGA image:
+ */
+#if defined(CONFIG_SOCFPGA_LOAD_RAMDISK)
+# define CONFIG_SOCFPGA_LOAD_RAMDISK_CMD \
+	"ramdisk_file=uramdisk.image.gz\0" \
+	"ramdisk_loadaddr=0x02000000\0" \
+	"initrd_high=0x20000000\0" \
+	"mmcloadramdisk=" \
+		"mmc rescan;" \
+		"if ${mmcloadcmd} mmc 0:${mmcloadpart} ${ramdisk_loadaddr} ${ramdisk_file}; then " \
+			"env set ramdisk_addr ${ramdisk_loadaddr};" \
+			"env set bootargs console=ttyS0,115200 root=/dev/ram;" \
+		"else " \
+			"env set ramdisk_addr -;" \
+			"env set bootargs;" \
+		"fi;\0"
+#else
+# define CONFIG_SOCFPGA_LOAD_RAMDISK_CMD \
+	"mmcloadramdisk=true\0"
+#endif
+
 #define CONFIG_EXTRA_ENV_SETTINGS \
 	"verify=n\0" \
 	"loadaddr=" __stringify(CONFIG_SYS_LOAD_ADDR) "\0" \
 	"fdtaddr=0x00000100\0" \
 	"bootimage=zImage\0" \
 	"bootimagesize=0x600000\0" \
+	"ramdisk_addr=-\0" \
 	"fdtimage=socfpga.dtb\0" \
 	"fdtimagesize=0x7000\0" \
 	"mmcloadcmd=fatload\0" \
@@ -270,6 +292,7 @@
 	CONFIG_INIT_ENV_ONCE \
 	CONFIG_SOCFPGA_BOOTCMDS \
 	CONFIG_SOCFPGA_LOAD_FPGA_CMD \
+	CONFIG_SOCFPGA_LOAD_RAMDISK_CMD \
 	"nandload=nand read ${loadaddr} ${nandbootimageaddr} ${bootimagesize};"\
 		"nand read ${fdtaddr} ${nandfdtaddr} ${fdtimagesize}\0" \
 	"nandboot=setenv bootargs " CONFIG_BOOTARGS \
