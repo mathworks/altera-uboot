@@ -94,7 +94,7 @@
  * Environment variable
  */
 #if IS_ENABLED(CONFIG_SPL_ATF)
-#define CONFIG_BOOTFILE "kernel.itb"
+#define CONFIG_BOOTFILE "Image"
 #else
 #define CONFIG_BOOTFILE "Image"
 #endif
@@ -195,15 +195,17 @@
 		"rootfstype=jffs2 rootwait;bootm ${loadaddr}\0" \
 	"loadaddr=" __stringify(CONFIG_SYS_LOAD_ADDR) "\0" \
 	"bootfile=" CONFIG_BOOTFILE "\0" \
+	"ethaddr=a6:e2:86:d7:dc:88\0" \
 	"fdt_addr=8000000\0" \
-	"fdtimage=" CONFIG_DEFAULT_DEVICE_TREE ".dtb\0" \
+	"fdtimage=devicetree.dtb\0" \
 	"mmcroot=/dev/mmcblk0p2\0" \
 	"mmcboot=setenv bootargs " CONFIG_BOOTARGS \
-		" root=${mmcroot} rw rootwait;" \
-		"booti ${loadaddr} - ${fdt_addr}\0" \
+		" root=/dev/root rw rootwait;" \
+		"booti ${loadaddr} ${ramdisk_addr} ${fdt_addr}\0" \
 	"mmcload=mmc rescan;" \
 		"load mmc 0:1 ${loadaddr} ${bootfile};" \
-		"load mmc 0:1 ${fdt_addr} ${fdtimage}\0" \
+		"load mmc 0:1 ${fdt_addr} ${fdtimage};" \
+		"load mmc 0:1 ${ramdisk_addr} ${ramdisk_image}\0" \
 	"mmcfitboot=setenv bootargs " CONFIG_BOOTARGS \
 		" root=${mmcroot} rw rootwait;" \
 		"bootm ${loadaddr}\0" \
@@ -221,6 +223,9 @@
 		" ${qspi_clock}; then echo QSPI clock frequency updated;" \
 		" else fdt set /clocks/qspi-clk clock-frequency" \
 		" ${qspi_clock}; echo QSPI clock frequency updated; fi; fi\0" \
+	"ramdisk_image=uramdisk.image.gz\0" \
+	"ramdisk_addr=9000000\0" \
+	"rbfcoreimage=socfpga.core.rbf\0" \
 	"scriptaddr=0x02100000\0" \
 	"scriptfile=u-boot.scr\0" \
 	"fatscript=if fatload mmc 0:1 ${scriptaddr} ${scriptfile};" \
