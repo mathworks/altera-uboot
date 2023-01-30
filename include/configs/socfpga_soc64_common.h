@@ -90,6 +90,22 @@
 #define CONFIG_SYS_NAND_U_BOOT_DST	CONFIG_SYS_TEXT_BASE
 #endif /* CONFIG_NAND_DENALI */
 
+/* 
+ * Initialize environment:
+ * Run the saveenv command on the first boot to initialize the env
+ * storage.
+ */
+#if defined(CONFIG_ENV_IS_IN_FAT)
+# define ENV_CMD_INIT_ENV_ONCE \
+	"uenv_init=" \
+		"echo Storing default uboot environment...;" \
+		"env set uenv_init true;" \
+		"saveenv\0"
+#else
+# define ENV_CMD_INIT_ENV_ONCE \
+	"uenv_init=true \0"
+#endif
+
 /*
  * Environment variable
  */
@@ -203,6 +219,7 @@
 		" root=/dev/root rw rootwait;" \
 		"booti ${loadaddr} ${ramdisk_addr} ${fdt_addr}\0" \
 	"mmcload=mmc rescan;" \
+		"run uenv_init;" \
 		"load mmc 0:1 ${loadaddr} ${bootfile};" \
 		"load mmc 0:1 ${fdt_addr} ${fdtimage};" \
 		"load mmc 0:1 ${ramdisk_addr} ${ramdisk_image}\0" \
@@ -244,7 +261,8 @@
 		"rsu display_dcmf_status; rsu display_max_retry\0" \
 	"smc_fid_rd=0xC2000007\0" \
 	"smc_fid_wr=0xC2000008\0" \
-	"smc_fid_upd=0xC2000009\0 "
+	"smc_fid_upd=0xC2000009\0 " \
+	ENV_CMD_INIT_ENV_ONCE
 #endif /*#if IS_ENABLED(CONFIG_DISTRO_DEFAULTS)*/
 
 /*
