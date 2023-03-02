@@ -220,6 +220,7 @@
 		"booti ${loadaddr} ${ramdisk_addr} ${fdt_addr}\0" \
 	"mmcload=mmc rescan;" \
 		"run uenv_init;" \
+		"run fpga_periph_update; " \
 		"load mmc 0:1 ${loadaddr} ${bootfile};" \
 		"load mmc 0:1 ${fdt_addr} ${fdtimage};" \
 		"load mmc 0:1 ${ramdisk_addr} ${ramdisk_image}\0" \
@@ -262,6 +263,26 @@
 	"smc_fid_rd=0xC2000007\0" \
 	"smc_fid_wr=0xC2000008\0" \
 	"smc_fid_upd=0xC2000009\0 " \
+	"periph_info_offset=0x0300000\0 " \
+	"rpd_file=socfpga_jic.rpd\0 " \
+	"rpd_load_addr=0x02000000\0 " \
+	"sdm_load_addr=0x08000000\0 " \
+	"fpga_periph_update=if run rpd_existence_test; then " \
+		"run sdm_flash_update; " \
+		"else echo No RPD file found, skipping SDM flash update; fi\0 " \
+	"rpd_existence_test=test -e mmc 0 ${rpd_file}\0 " \
+	"sdm_flash_update=fatload mmc 0 $rpd_load_addr $rpd_file 8 $periph_info_offset; " \
+		"sf probe 0; " \
+		"sf read $sdm_load_addr $periph_info_offset 8; " \
+		"if cmp.b $rpd_load_addr $sdm_load_addr 8; then "\
+			"echo Peripheral info in RPD matches, skipping SDM flash update; " \
+		"else run program_rpd; fi\0 "\
+	"program_rpd=echo Load RPD from SD card into SDM flash and reset...; " \
+		"fatload mmc 0 $rpd_load_addr $rpd_file; " \
+		"sf probe 0; " \
+		"sf erase 0 +${filesize}; " \
+		"sf write ${rpd_load_addr} 0 ${filesize}; " \
+		"reset\0 " \
 	ENV_CMD_INIT_ENV_ONCE
 #endif /*#if IS_ENABLED(CONFIG_DISTRO_DEFAULTS)*/
 
